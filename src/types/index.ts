@@ -1,4 +1,7 @@
+export type VehicleStatus = "active" | "retired" | "sold" | "traded";
+
 export interface Vehicle {
+  id: string; // unique per vehicle
   make: string;
   model: string;
   year: number;
@@ -7,17 +10,22 @@ export interface Vehicle {
   licensePlate?: string;
   color?: string;
   vin?: string;
-  fuelTankCapacity: number; // liters
-  initialOdometer: number; // km
-  defaultFuelConsumption?: number; // L/100km
+  fuelTankCapacity: number;
+  initialOdometer: number;
+  defaultFuelConsumption?: number;
   defaultCategory?: string;
   fuelType?: string;
+  status?: VehicleStatus; // default "active"
   purchasePrice?: number;
   purchaseDate?: string;
+  saleValue?: number;
+  saleDate?: string;
+  tradeNotes?: string;
+  ownershipNotes?: string;
   insuranceExpiry?: string;
   registrationExpiry?: string;
   warrantyExpiry?: string;
-  photo?: string; // base64 data URL
+  photo?: string;
   notes?: string;
 }
 
@@ -26,15 +34,18 @@ export interface Trip {
   date: string;
   startOdometer?: number;
   endOdometer?: number;
-  distance: number; // km
+  distance: number;
   category: string;
   purpose?: string;
   startLocation?: string;
   endLocation?: string;
-  duration?: number; // minutes
+  duration?: number;
   fuelUsed?: number;
+  fuelEconomy?: number;
+  tripCost?: number;
   notes?: string;
   createdAt: string;
+  vehicleId?: string;
 }
 
 export interface FillUp {
@@ -42,15 +53,16 @@ export interface FillUp {
   date: string;
   odometer: number;
   liters: number;
-  pricePerUnit: number; // currency per liter
-  discount?: number; // cents per liter
+  pricePerUnit: number;
+  discount?: number;
   totalCost: number;
   station?: string;
   fuelGrade?: string;
   isFull: boolean;
-  fuelEconomy?: number; // L/100km (or mpg)
+  fuelEconomy?: number;
   notes?: string;
   createdAt: string;
+  vehicleId?: string;
 }
 
 export interface MaintenanceReminder {
@@ -71,16 +83,18 @@ export interface Maintenance {
   nextDueDate?: string;
   notes?: string;
   createdAt: string;
+  vehicleId?: string;
 }
 
 export interface VehicleCost {
   id: string;
   date: string;
-  category: "maintenance" | "tires" | "insurance" | "registration" | "other";
+  category: "maintenance" | "tires" | "insurance" | "registration" | "repairs" | "accessories" | "interest" | "other";
   description: string;
   amount: number;
   notes?: string;
   createdAt: string;
+  vehicleId?: string;
 }
 
 export interface Units {
@@ -90,22 +104,32 @@ export interface Units {
   currency: string;
 }
 
+export interface FuelOverride {
+  fuelPercent: number;  // 0-100
+  rangeKm: number;
+  setAt: string;        // ISO date of when override was set
+  afterFillUpId?: string;
+}
+
 export interface Settings {
-  vehicleInfo?: Vehicle;
+  vehicleInfo?: Vehicle;   // kept for single-vehicle backward compat
+  vehicles?: Vehicle[];    // multi-vehicle list
+  activeVehicleId?: string;
   theme: "light" | "dark" | "system";
   units: Units;
   categories: string[];
   lastBackup?: string;
   defaultCategory?: string;
+  fuelOverride?: FuelOverride;
 }
 
 export interface LifetimeStats {
   totalDistance: number;
   totalFuelUsed: number;
   totalFuelCost: number;
-  totalDriveTime: number; // minutes
+  totalDriveTime: number;
   totalTrips: number;
-  avgFuelConsumption: number; // L/100km
+  avgFuelConsumption: number;
   costPerKm: number;
 }
 
@@ -114,6 +138,18 @@ export interface StationStat {
   avgPrice: number;
   totalSpend: number;
   visits: number;
+}
+
+export interface MonthStats {
+  month: string;        // "YYYY-MM"
+  label: string;        // "Jan 2025"
+  distance: number;
+  fuelCost: number;     // fuel consumed cost (allocated to trips)
+  fuelPurchased: number;
+  fuelEconomy: number;
+  costPerKm: number;
+  tripCount: number;
+  fillUpCount: number;
 }
 
 export interface StatsResult {
@@ -139,12 +175,34 @@ export interface StatsResult {
   estimatedFuelRemaining?: number;
   estimatedRangeRemaining?: number;
   stationStats: StationStat[];
-  // v2 additions
   currentMonthDistance: number;
   currentMonthTrips: number;
+  currentMonthFuelEconomy: number;
+  currentMonthTripCost: number;
   longestTrip?: Trip;
   mostExpensiveMonth?: { month: string; spend: number };
   cheapestStation?: StationStat;
   avgTripDistance: number;
   yearlySpend: { year: string; spend: number }[];
+  allMonths: MonthStats[];
+}
+
+export interface OwnershipCostSummary {
+  purchasePrice: number;
+  maintenance: number;
+  fuel: number;
+  insurance: number;
+  registration: number;
+  repairs: number;
+  accessories: number;
+  interest: number;
+  tires: number;
+  totalCost: number;
+  saleValue: number;
+  netCost: number;
+  totalKm: number;
+  totalDays: number;
+  costPerKm: number;
+  costPerDay: number;
+  totalDepreciation: number;
 }

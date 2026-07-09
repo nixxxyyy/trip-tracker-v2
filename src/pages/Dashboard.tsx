@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "wouter";
-import { Plus, Droplet, Wrench, Fuel, Car, Gauge, TrendingUp, TrendingDown, Calendar, Activity, ChevronRight, AlertTriangle, Zap, MapPin } from "lucide-react";
+import { Plus, Droplet, Wrench, Fuel, Car, Gauge, TrendingUp, TrendingDown, Calendar, Activity, ChevronRight, AlertTriangle, Zap, MapPin, Edit2, Check, X } from "lucide-react";
 import { getStatsForRange } from "@/lib/db";
 import type { StatsResult, Maintenance } from "@/types";
 import { TripCard } from "@/components/TripCard";
@@ -10,56 +10,36 @@ import { useAppContext } from "@/contexts/AppContext";
 import { useData } from "@/contexts/DataContext";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { format, parseISO } from "date-fns";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function StatCard({
-  title, value, sub, icon, accent = false, trend, href
-}: {
-  title: string;
-  value: string;
-  sub?: string;
-  icon: React.ReactNode;
-  accent?: boolean;
-  trend?: { up: boolean; text: string };
-  href?: string;
+function StatCard({ title, value, sub, icon, accent = false, trend, href }: {
+  title: string; value: string; sub?: string; icon: React.ReactNode;
+  accent?: boolean; trend?: { up: boolean; text: string }; href?: string;
 }) {
   const inner = (
     <div className={cn(
-      "rounded-2xl p-4 border card-lift cursor-default",
-      accent
-        ? "bg-primary text-primary-foreground border-primary/20"
-        : "bg-card border-card-border"
+      "rounded-2xl p-4 border card-lift",
+      accent ? "bg-primary text-primary-foreground border-primary/20" : "bg-card border-card-border"
     )}>
       <div className="flex items-start justify-between mb-3">
-        <div className={cn(
-          "w-8 h-8 rounded-xl flex items-center justify-center",
-          accent ? "bg-white/20" : "bg-primary/10"
-        )}>
+        <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center", accent ? "bg-white/20" : "bg-primary/10")}>
           <span className={accent ? "text-white" : "text-primary"}>{icon}</span>
         </div>
         {trend && (
-          <span className={cn(
-            "text-[10px] font-semibold flex items-center gap-0.5 px-1.5 py-0.5 rounded-full",
-            accent
-              ? "bg-white/20 text-white"
-              : trend.up
-                ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
-                : "bg-red-50 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
+          <span className={cn("text-[10px] font-semibold flex items-center gap-0.5 px-1.5 py-0.5 rounded-full",
+            accent ? "bg-white/20 text-white"
+              : trend.up ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+              : "bg-red-50 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
           )}>
             {trend.up ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
             {trend.text}
           </span>
         )}
       </div>
-      <p className={cn("text-[11px] font-semibold tracking-wide uppercase mb-0.5", accent ? "text-white/70" : "text-muted-foreground/70")}>
-        {title}
-      </p>
-      <p className={cn("text-xl font-bold stat-value leading-tight", accent ? "text-white" : "text-foreground")}>
-        {value}
-      </p>
+      <p className={cn("text-[11px] font-semibold tracking-wide uppercase mb-0.5", accent ? "text-white/70" : "text-muted-foreground/70")}>{title}</p>
+      <p className={cn("text-xl font-bold stat-value leading-tight", accent ? "text-white" : "text-foreground")}>{value}</p>
       {sub && <p className={cn("text-[11px] mt-0.5", accent ? "text-white/60" : "text-muted-foreground")}>{sub}</p>}
     </div>
   );
@@ -67,15 +47,10 @@ function StatCard({
   return inner;
 }
 
-function QuickAction({ href, label, icon, className }: {
-  href: string; label: string; icon: React.ReactNode; className?: string;
-}) {
+function QuickAction({ href, label, icon, className }: { href: string; label: string; icon: React.ReactNode; className?: string }) {
   return (
     <Link href={href}>
-      <button className={cn(
-        "flex flex-col items-center justify-center gap-1.5 w-full py-3 px-2 rounded-2xl text-xs font-semibold transition-all duration-200 active:scale-95",
-        className
-      )}>
+      <button className={cn("flex flex-col items-center justify-center gap-1.5 w-full py-3 px-2 rounded-2xl text-xs font-semibold transition-all duration-200 active:scale-95", className)}>
         <span className="text-lg">{icon}</span>
         {label}
       </button>
@@ -84,29 +59,26 @@ function QuickAction({ href, label, icon, className }: {
 }
 
 function UpcomingMaintenanceCard({ item, odometer }: { item: Maintenance; odometer: number }) {
-  const isDue = item.nextDueKm != null && odometer >= item.nextDueKm;
   const kmLeft = item.nextDueKm != null ? item.nextDueKm - odometer : null;
-  const isClose = kmLeft != null && kmLeft < 500 && kmLeft >= 0;
-
+  const isDue = kmLeft != null && kmLeft <= 0;
+  const isClose = kmLeft != null && kmLeft > 0 && kmLeft < 500;
   return (
-    <div className={cn(
-      "flex items-center gap-3 px-4 py-3 border-b border-border last:border-0",
+    <div className={cn("flex items-center gap-3 px-4 py-3 border-b border-border last:border-0",
       isDue ? "bg-rose-50/50 dark:bg-rose-950/20" : isClose ? "bg-amber-50/50 dark:bg-amber-950/20" : ""
     )}>
-      <div className={cn(
-        "w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
+      <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
         isDue ? "bg-rose-100 dark:bg-rose-900" : isClose ? "bg-amber-100 dark:bg-amber-900" : "bg-muted"
       )}>
         <Wrench className={cn("h-3.5 w-3.5", isDue ? "text-rose-600 dark:text-rose-400" : isClose ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold truncate">{item.type}</p>
-        {item.nextDueKm != null && (
+        {kmLeft != null && (
           <p className={cn("text-xs", isDue ? "text-rose-600 dark:text-rose-400" : isClose ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
-            {isDue ? `Overdue by ${Math.abs(kmLeft!).toLocaleString()} km` : `Due in ${kmLeft!.toLocaleString()} km`}
+            {isDue ? `Overdue by ${Math.abs(kmLeft).toLocaleString()} km` : `Due in ${kmLeft.toLocaleString()} km`}
           </p>
         )}
-        {item.nextDueDate && (
+        {item.nextDueDate && kmLeft == null && (
           <p className="text-xs text-muted-foreground">Due {format(parseISO(item.nextDueDate), "MMM d, yyyy")}</p>
         )}
       </div>
@@ -115,57 +87,86 @@ function UpcomingMaintenanceCard({ item, odometer }: { item: Maintenance; odomet
   );
 }
 
-// ── Main Component ────────────────────────────────────────────────────────────
-
 export default function Dashboard() {
-  const { settings } = useAppContext();
+  const { settings, activeVehicle, setFuelOverride } = useAppContext();
   const { trips, fillUps, maintenance, isLoading: dataLoading } = useData();
   const [stats, setStats] = useState<StatsResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [editingFuel, setEditingFuel] = useState(false);
+  const [fuelPctInput, setFuelPctInput] = useState("");
+  const [rangeInput, setRangeInput] = useState("");
 
-  useEffect(() => {
+  const loadStats = useCallback(() => {
     if (dataLoading) return;
-    getStatsForRange("", "")
-      .then(setStats)
-      .catch(console.error)
-      .finally(() => setIsLoading(false));
-  }, [trips, fillUps, dataLoading]);
+    getStatsForRange("", "").then(setStats).catch(console.error).finally(() => setIsLoading(false));
+  }, [dataLoading, trips, fillUps]);
+
+  useEffect(() => { loadStats(); }, [loadStats]);
 
   const unit = settings?.units.distance || "km";
   const currency = settings?.units.currency || "$";
   const effUnit = settings?.units.fuelEfficiency || "L/100km";
   const volUnit = settings?.units.volume || "liters";
 
-  const vehicle = settings?.vehicleInfo;
-  const vehicleName = vehicle?.name || (vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : null);
+  const vehicleName = activeVehicle?.name
+    || (activeVehicle ? `${activeVehicle.year} ${activeVehicle.make} ${activeVehicle.model}` : null);
 
-  // Current odometer estimate
   const latestOdometer = Math.max(
     ...trips.filter(t => t.endOdometer != null).map(t => t.endOdometer!),
     ...(fillUps.length > 0 ? [fillUps[0].odometer] : []),
-    vehicle?.initialOdometer ?? 0,
+    activeVehicle?.initialOdometer ?? 0,
+    0,
   );
 
-  // Upcoming maintenance items
   const upcomingMaintenance = maintenance
     .filter(m => m.nextDueKm != null || m.nextDueDate != null)
-    .sort((a, b) => {
-      const aKm = a.nextDueKm ?? Infinity;
-      const bKm = b.nextDueKm ?? Infinity;
-      return aKm - bKm;
-    })
+    .sort((a, b) => (a.nextDueKm ?? Infinity) - (b.nextDueKm ?? Infinity))
     .slice(0, 3);
 
-  // Last fill-up
   const lastFillUp = fillUps[0];
+
+  // Fuel level — prefer manual override if recent, else computed
+  const override = settings?.fuelOverride;
+  let fuelPct = 0;
+  let fuelRemaining = stats?.estimatedFuelRemaining;
+  let rangeRemaining = stats?.estimatedRangeRemaining;
+
+  if (override) {
+    fuelPct = override.fuelPercent;
+    const tankSize = activeVehicle?.fuelTankCapacity ?? 60;
+    fuelRemaining = parseFloat(((fuelPct / 100) * tankSize).toFixed(1));
+    const avgL100 = stats?.lifetime.avgFuelConsumption ?? 8;
+    rangeRemaining = avgL100 > 0 ? Math.round((fuelRemaining / avgL100) * 100) : 0;
+  } else if (stats?.estimatedFuelRemaining != null && activeVehicle?.fuelTankCapacity) {
+    fuelPct = Math.min(100, Math.max(0, (stats.estimatedFuelRemaining / activeVehicle.fuelTankCapacity) * 100));
+    fuelRemaining = stats.estimatedFuelRemaining;
+    rangeRemaining = stats.estimatedRangeRemaining;
+  }
+
+  const fuelColor = fuelPct > 50 ? "#22c55e" : fuelPct > 25 ? "#f59e0b" : "#ef4444";
+
+  const handleSaveFuelOverride = async () => {
+    const pct = parseFloat(fuelPctInput);
+    const range = parseFloat(rangeInput);
+    if (isNaN(pct) || pct < 0 || pct > 100) return;
+    await setFuelOverride({
+      fuelPercent: pct,
+      rangeKm: isNaN(range) ? 0 : range,
+      setAt: new Date().toISOString(),
+    });
+    setEditingFuel(false);
+  };
+
+  const handleClearOverride = async () => {
+    await setFuelOverride(null);
+    setEditingFuel(false);
+  };
 
   if (isLoading || dataLoading) {
     return (
       <div className="flex flex-col gap-4 pt-4">
         <Skeleton className="h-8 w-48 rounded-lg" />
-        <div className="grid grid-cols-2 gap-3">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
-        </div>
+        <div className="grid grid-cols-2 gap-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}</div>
         <Skeleton className="h-24 rounded-2xl" />
         <Skeleton className="h-48 rounded-2xl" />
       </div>
@@ -173,34 +174,25 @@ export default function Dashboard() {
   }
 
   if (!stats) return <div className="py-12 text-center text-muted-foreground">Error loading stats</div>;
-
-  const lt = stats.lifetime;
   const isEmpty = trips.length === 0 && fillUps.length === 0;
-
-  // Monthly trend for fuel spending
-  const thisMonth = stats.monthlySpend[stats.monthlySpend.length - 1];
-  const lastMonth = stats.monthlySpend[stats.monthlySpend.length - 2];
-  const spendTrend = thisMonth && lastMonth && lastMonth.spend > 0
-    ? { up: thisMonth.spend > lastMonth.spend, text: `${Math.abs(((thisMonth.spend - lastMonth.spend) / lastMonth.spend) * 100).toFixed(0)}%` }
+  const lt = stats.lifetime;
+  const spendTrend = stats.monthlySpend.length >= 2
+    ? (() => {
+        const cur = stats.monthlySpend[stats.monthlySpend.length - 1].spend;
+        const prev = stats.monthlySpend[stats.monthlySpend.length - 2].spend;
+        return prev > 0 ? { up: cur > prev, text: `${Math.abs(((cur - prev) / prev) * 100).toFixed(0)}%` } : undefined;
+      })()
     : undefined;
-
-  // Fuel gauge percent
-  let fuelPct = 0;
-  if (stats.estimatedFuelRemaining != null && vehicle?.fuelTankCapacity) {
-    fuelPct = Math.min(100, Math.max(0, (stats.estimatedFuelRemaining / vehicle.fuelTankCapacity) * 100));
-  }
-  const fuelColor = fuelPct > 50 ? "#22c55e" : fuelPct > 25 ? "#f59e0b" : "#ef4444";
 
   return (
     <div className="flex flex-col gap-5 page-enter pb-8 pt-4">
-
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-xs text-muted-foreground mt-0.5">{format(new Date(), "EEEE, MMM d")}</p>
         </div>
-        {vehicle && (
+        {activeVehicle && (
           <Link href="/settings">
             <div className="flex items-center gap-2 bg-card border border-card-border rounded-xl px-3 py-2">
               <Car className="h-3.5 w-3.5 text-primary shrink-0" />
@@ -210,7 +202,7 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* ── Empty state ── */}
+      {/* Empty state */}
       {isEmpty && (
         <div className="bg-card border border-card-border rounded-2xl p-8 text-center">
           <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -225,7 +217,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Quick Actions ── */}
+      {/* Quick Actions */}
       {!isEmpty && (
         <div className="grid grid-cols-3 gap-2">
           <QuickAction href="/add" label="Add Trip" icon={<MapPin className="h-5 w-5" />} className="action-btn-trip" />
@@ -234,111 +226,120 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Fuel gauge ── */}
-      {stats.estimatedFuelRemaining != null && vehicle?.fuelTankCapacity && (
+      {/* Fuel gauge */}
+      {(fuelRemaining != null || activeVehicle?.fuelTankCapacity) && !isEmpty && (
         <div className="bg-card border border-card-border rounded-2xl p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <Fuel className="h-4 w-4 text-primary" />
               <span className="text-sm font-semibold">Fuel Level</span>
+              {override && <span className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 rounded px-1.5 py-0.5 font-semibold">Manual</span>}
             </div>
-            <span className="text-sm font-bold">{formatVolume(stats.estimatedFuelRemaining, volUnit)}</span>
+            <button onClick={() => { setEditingFuel(e => !e); setFuelPctInput(fuelPct.toFixed(0)); setRangeInput(rangeRemaining?.toFixed(0) ?? ""); }}
+              className="text-xs text-primary font-semibold flex items-center gap-1">
+              <Edit2 className="h-3 w-3" /> Adjust
+            </button>
           </div>
-          <div className="fuel-bar-track mb-2">
-            <div
-              className="fuel-bar-fill"
-              style={{ width: `${fuelPct}%`, background: fuelColor }}
-            />
-          </div>
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>{fuelPct.toFixed(0)}% full</span>
-            {stats.estimatedRangeRemaining != null && (
-              <span>~{stats.estimatedRangeRemaining.toLocaleString()} {unit} range</span>
-            )}
-          </div>
+
+          {editingFuel ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Fuel Level %</label>
+                  <Input type="number" min="0" max="100" value={fuelPctInput}
+                    onChange={e => setFuelPctInput(e.target.value)} className="h-9" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Est. Range (km)</label>
+                  <Input type="number" value={rangeInput}
+                    onChange={e => setRangeInput(e.target.value)} className="h-9" />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleSaveFuelOverride} className="flex-1 h-8 rounded-xl gap-1">
+                  <Check className="h-3.5 w-3.5" /> Save
+                </Button>
+                {override && (
+                  <Button size="sm" variant="outline" onClick={handleClearOverride} className="h-8 rounded-xl gap-1">
+                    <X className="h-3.5 w-3.5" /> Clear
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={() => setEditingFuel(false)} className="h-8 rounded-xl">Cancel</Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="fuel-bar-track mb-2">
+                <div className="fuel-bar-fill" style={{ width: `${fuelPct}%`, background: fuelColor }} />
+              </div>
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>
+                  {fuelPct.toFixed(0)}% full
+                  {fuelRemaining != null && ` · ${formatVolume(fuelRemaining, volUnit)}`}
+                </span>
+                {rangeRemaining != null && rangeRemaining > 0 && (
+                  <span>~{rangeRemaining.toLocaleString()} {unit} range</span>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {/* ── Stats grid ── */}
+      {/* Stats grid */}
       {!isEmpty && (
         <div className="grid grid-cols-2 gap-3">
-          <StatCard
-            title="This Month"
-            value={formatCurrency(stats.currentMonthSpend, currency)}
-            sub={`${stats.currentMonthDistance > 0 ? formatDistance(stats.currentMonthDistance, unit) : "—"} driven`}
-            icon={<Calendar className="h-4 w-4" />}
-            trend={spendTrend}
-          />
-          <StatCard
-            title="Lifetime Distance"
-            value={formatDistance(lt.totalDistance, unit)}
-            sub={`${lt.totalTrips} trips`}
-            icon={<Activity className="h-4 w-4" />}
-            accent
-          />
-          <StatCard
-            title="Fuel Economy"
-            value={lt.avgFuelConsumption > 0 ? formatEfficiency(lt.avgFuelConsumption, effUnit) : "—"}
-            sub="lifetime average"
-            icon={<Zap className="h-4 w-4" />}
-          />
-          <StatCard
-            title="Odometer"
-            value={latestOdometer > 0 ? `${latestOdometer.toLocaleString()} km` : "—"}
-            sub="current estimate"
-            icon={<Gauge className="h-4 w-4" />}
-          />
+          <StatCard title="This Month" value={formatCurrency(stats.currentMonthTripCost, currency)}
+            sub={`${formatDistance(stats.currentMonthDistance, unit)} driven`}
+            icon={<Calendar className="h-4 w-4" />} trend={spendTrend} />
+          <StatCard title="Lifetime Distance" value={formatDistance(lt.totalDistance, unit)}
+            sub={`${lt.totalTrips} trips`} icon={<Activity className="h-4 w-4" />} accent />
+          <StatCard title="Fuel Economy"
+            value={stats.currentMonthFuelEconomy > 0 ? formatEfficiency(stats.currentMonthFuelEconomy, effUnit) : (lt.avgFuelConsumption > 0 ? formatEfficiency(lt.avgFuelConsumption, effUnit) : "—")}
+            sub="this month avg" icon={<Zap className="h-4 w-4" />} />
+          <StatCard title="Odometer" value={latestOdometer > 0 ? `${latestOdometer.toLocaleString()} km` : "—"}
+            sub="current estimate" icon={<Gauge className="h-4 w-4" />} />
         </div>
       )}
 
-      {/* ── Last fill-up ── */}
+      {/* Last fill-up */}
       {lastFillUp && (
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="section-label">Last Fill-Up</span>
-            <Link href="/fillups" className="text-xs text-primary font-semibold flex items-center gap-0.5">
-              All <ChevronRight className="h-3 w-3" />
-            </Link>
+            <Link href="/fillups" className="text-xs text-primary font-semibold flex items-center gap-0.5">All <ChevronRight className="h-3 w-3" /></Link>
           </div>
           <FillUpCard fillUp={lastFillUp} />
         </div>
       )}
 
-      {/* ── Upcoming maintenance ── */}
+      {/* Upcoming maintenance */}
       {upcomingMaintenance.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="section-label">Upcoming Service</span>
-            <Link href="/maintenance" className="text-xs text-primary font-semibold flex items-center gap-0.5">
-              All <ChevronRight className="h-3 w-3" />
-            </Link>
+            <Link href="/maintenance" className="text-xs text-primary font-semibold flex items-center gap-0.5">All <ChevronRight className="h-3 w-3" /></Link>
           </div>
           <div className="bg-card border border-card-border rounded-2xl overflow-hidden">
-            {upcomingMaintenance.map(m => (
-              <UpcomingMaintenanceCard key={m.id} item={m} odometer={latestOdometer} />
-            ))}
+            {upcomingMaintenance.map(m => <UpcomingMaintenanceCard key={m.id} item={m} odometer={latestOdometer} />)}
           </div>
         </div>
       )}
 
-      {/* ── Recent trips ── */}
+      {/* Recent trips */}
       {stats.recentTrips.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="section-label">Recent Trips</span>
-            <Link href="/trips" className="text-xs text-primary font-semibold flex items-center gap-0.5">
-              All <ChevronRight className="h-3 w-3" />
-            </Link>
+            <Link href="/trips" className="text-xs text-primary font-semibold flex items-center gap-0.5">All <ChevronRight className="h-3 w-3" /></Link>
           </div>
           <div className="flex flex-col gap-2.5">
-            {stats.recentTrips.slice(0, 3).map(trip => (
-              <TripCard key={trip.id} trip={trip} />
-            ))}
+            {stats.recentTrips.slice(0, 3).map(trip => <TripCard key={trip.id} trip={trip} />)}
           </div>
         </div>
       )}
 
-      {/* ── Quick stats summary row ── */}
+      {/* Quick stats */}
       {lt.totalFuelCost > 0 && (
         <div className="bg-card border border-card-border rounded-2xl overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex justify-between">
@@ -347,9 +348,7 @@ export default function Dashboard() {
           </div>
           <div className="px-4 py-3 border-b border-border flex justify-between">
             <span className="text-sm text-muted-foreground">Cost per km</span>
-            <span className="text-sm font-semibold">
-              {lt.costPerKm > 0 ? `${currency}${lt.costPerKm.toFixed(4)}/km` : "—"}
-            </span>
+            <span className="text-sm font-semibold">{lt.costPerKm > 0 ? `${currency}${lt.costPerKm.toFixed(4)}/km` : "—"}</span>
           </div>
           <div className="px-4 py-3 flex justify-between">
             <span className="text-sm text-muted-foreground">Total Fuel Used</span>
@@ -360,5 +359,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
-

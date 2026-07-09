@@ -17,11 +17,10 @@ import SettingsPage from "@/pages/Settings";
 import Analytics from "@/pages/Analytics";
 import MaintenancePage from "@/pages/Maintenance";
 import VehicleCostsPage from "@/pages/VehicleCosts";
+import OwnershipCostPage from "@/pages/OwnershipCost";
 
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { retry: 1, staleTime: 30_000 },
-  },
+  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 });
 
 function Router() {
@@ -36,6 +35,7 @@ function Router() {
         <Route path="/analytics" component={Analytics} />
         <Route path="/maintenance" component={MaintenancePage} />
         <Route path="/vehicle-costs" component={VehicleCostsPage} />
+        <Route path="/ownership-cost" component={OwnershipCostPage} />
         <Route path="/settings" component={SettingsPage} />
         <Route component={NotFound} />
       </Switch>
@@ -43,18 +43,16 @@ function Router() {
   );
 }
 
-function App() {
+export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppProvider>
         <DataProvider>
           <TooltipProvider>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <div className="app-container">
-                <Router />
-                <BottomNav />
-                <PWAInstallBanner />
-              </div>
+            <WouterRouter base="/">
+              <Router />
+              <BottomNav />
+              <PWAInstallBanner />
             </WouterRouter>
             <Toaster />
           </TooltipProvider>
@@ -63,5 +61,3 @@ function App() {
     </QueryClientProvider>
   );
 }
-
-export default App;

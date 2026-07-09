@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useLocation, Link } from "wouter";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowRightLeft, Droplet } from "lucide-react";
+import { ArrowLeft, Droplet, ArrowRightLeft } from "lucide-react";
 
 const tripSchema = z.object({
   date: z.string().min(1, "Required"),
@@ -27,13 +27,14 @@ const tripSchema = z.object({
   endLocation: z.string().optional(),
   notes: z.string().optional(),
 });
-
 type TripForm = z.infer<typeof tripSchema>;
 
 export default function AddTrip() {
   const [, setLocation] = useLocation();
-  const { createTrip } = useData();
-  const { settings } = useAppContext();
+  const { createTrip, fillUps } = useData();
+  const { settings, activeVehicle } = useAppContext();
+  // Track last odometer for a pre-filled start
+  const lastOdometer = fillUps.length > 0 ? fillUps[0].odometer : (activeVehicle?.initialOdometer ?? 0);
 
   const defaultCategory = settings?.defaultCategory || settings?.categories?.[0] || "Personal";
 
@@ -42,7 +43,7 @@ export default function AddTrip() {
     defaultValues: {
       date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
       distance: "" as any,
-      startOdometer: "",
+      startOdometer: lastOdometer > 0 ? String(lastOdometer) : "",
       endOdometer: "",
       duration: "",
       category: defaultCategory,
@@ -53,17 +54,21 @@ export default function AddTrip() {
     },
   });
 
-  const startOdo = form.watch("startOdometer");
-  const endOdo   = form.watch("endOdometer");
+  // Auto-compute distance only when BOTH odometers have values
+  // Use a ref to track whether the user manually edited distance
+  const distanceManuallySet = useRef(false);
 
-  // Auto-compute distance from odometer readings
+  const startOdo = form.watch("startOdometer");
+  const endOdo = form.watch("endOdometer");
+
   useEffect(() => {
+    if (distanceManuallySet.current) return;
     const s = parseFloat(startOdo || "");
     const e = parseFloat(endOdo || "");
     if (!isNaN(s) && !isNaN(e) && e > s) {
-      form.setValue("distance", parseFloat((e - s).toFixed(1)));
+      form.setValue("distance", parseFloat((e - s).toFixed(1)), { shouldValidate: false });
     }
-  }, [startOdo, endOdo, form]);
+  }, [startOdo, endOdo]);
 
   const onSubmit = async (values: TripForm) => {
     try {
@@ -83,30 +88,27 @@ export default function AddTrip() {
       });
       toast.success("Trip saved");
       setLocation("/trips");
-    } catch {
-      toast.error("Failed to save trip");
-    }
+    } catch { toast.error("Failed to save trip"); }
   };
 
   return (
     <div className="flex flex-col gap-5 page-enter pb-8 pt-4">
-      {/* Header */}
       <div className="flex items-center gap-3">
-        <button onClick={() => setLocation("/trips")} className="w-8 h-8 rounded-xl bg-card border border-card-border flex items-center justify-center">
+        <button onClick={() => setLocation("/trips")} className="w-8 h-8 rounded-xl bg-card border border-card-border flex items-center justify-center shrink-0">
           <ArrowLeft className="h-4 w-4" />
         </button>
         <h1 className="text-xl font-bold tracking-tight">Log Trip</h1>
         <Link href="/add-fillup" className="ml-auto">
           <Button variant="outline" size="sm" className="h-8 gap-1.5 rounded-xl text-xs">
-            <Droplet className="h-3.5 w-3.5" /> Fill-Up
+            <Droplet className="h-3.5 w-3.5" />Fill-Up
           </Button>
         </Link>
       </div>
 
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        {/* IMPORTANT: onSubmit on form element prevents keyboard dismiss */}
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
 
-          {/* Core fields */}
           <div className="bg-card border border-card-border rounded-2xl p-4 space-y-4">
             <FormField control={form.control} name="date" render={({ field }) => (
               <FormItem>
@@ -118,17 +120,12 @@ export default function AddTrip() {
 
             <FormField control={form.control} name="distance" render={({ field }) => (
               <FormItem>
-                <FormLabel className="flex items-baseline gap-1.5">
-                  Distance (km)
-                  <span className="text-primary text-[11px] font-medium">Required</span>
-                </FormLabel>
+                <FormLabel>Distance (km) <span className="text-primary text-[11px] font-medium">Required</span></FormLabel>
                 <FormControl>
-                  <Input
-                    type="number" step="0.1" inputMode="decimal"
-                    placeholder="0.0"
+                  <Input type="number" step="0.1" inputMode="decimal" placeholder="0.0"
                     {...field}
-                    className="h-14 text-2xl font-bold tracking-tight"
-                  />
+                    onChange={e => { distanceManuallySet.current = true; field.onChange(e); }}
+                    className="h-14 text-2xl font-bold tracking-tight" />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -138,13 +135,9 @@ export default function AddTrip() {
               <FormItem>
                 <FormLabel>Category</FormLabel>
                 <Select onValueChange={field.onChange} value={field.value}>
-                  <FormControl>
-                    <SelectTrigger className="h-11"><SelectValue placeholder="Select category" /></SelectTrigger>
-                  </FormControl>
+                  <FormControl><SelectTrigger className="h-11"><SelectValue /></SelectTrigger></FormControl>
                   <SelectContent>
-                    {settings?.categories.map(c => (
-                      <SelectItem key={c} value={c}>{c}</SelectItem>
-                    ))}
+                    {settings?.categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <FormMessage />
@@ -152,7 +145,6 @@ export default function AddTrip() {
             )} />
           </div>
 
-          {/* Odometer + time */}
           <div className="bg-card border border-card-border rounded-2xl p-4 space-y-4">
             <p className="text-xs text-muted-foreground font-medium">Odometer (optional — auto-fills distance)</p>
             <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-end">
@@ -170,18 +162,14 @@ export default function AddTrip() {
                 </FormItem>
               )} />
             </div>
-
             <FormField control={form.control} name="duration" render={({ field }) => (
               <FormItem>
                 <FormLabel>Drive Time (minutes)</FormLabel>
-                <FormControl>
-                  <Input type="number" inputMode="numeric" placeholder="e.g. 35" {...field} className="h-11" />
-                </FormControl>
+                <FormControl><Input type="number" inputMode="numeric" placeholder="e.g. 35" {...field} className="h-11" /></FormControl>
               </FormItem>
             )} />
           </div>
 
-          {/* Optional details */}
           <div className="bg-card border border-card-border rounded-2xl p-4 space-y-4">
             <FormField control={form.control} name="purpose" render={({ field }) => (
               <FormItem>
@@ -189,7 +177,6 @@ export default function AddTrip() {
                 <FormControl><Input placeholder="e.g. Client meeting" {...field} className="h-11" /></FormControl>
               </FormItem>
             )} />
-
             <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-end">
               <FormField control={form.control} name="startLocation" render={({ field }) => (
                 <FormItem>
@@ -205,20 +192,15 @@ export default function AddTrip() {
                 </FormItem>
               )} />
             </div>
-
             <FormField control={form.control} name="notes" render={({ field }) => (
               <FormItem>
                 <FormLabel>Notes</FormLabel>
-                <FormControl>
-                  <Textarea placeholder="Any extra details..." {...field} className="resize-none" rows={2} />
-                </FormControl>
+                <FormControl><Textarea placeholder="Any extra details…" {...field} className="resize-none" rows={2} /></FormControl>
               </FormItem>
             )} />
           </div>
 
-          <Button type="submit" className="w-full h-13 text-base font-bold rounded-2xl">
-            Save Trip
-          </Button>
+          <Button type="submit" className="w-full h-13 text-base font-bold rounded-2xl">Save Trip</Button>
         </form>
       </Form>
     </div>

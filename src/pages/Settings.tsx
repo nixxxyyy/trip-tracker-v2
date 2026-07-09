@@ -5,10 +5,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Car, Download, Upload, Moon, Sun, Monitor, X, Plus,
   Wrench, DollarSign, ChevronRight, AlertCircle, CheckCircle2,
-  Palette, Settings2, Database, Hash,
+  Palette, Settings2, Database, Hash, Archive, Check,
 } from "lucide-react";
 import { tripsToCSV, fillUpsToCSV, parseTripsCSV, parseFillUpsCSV } from "@/lib/export";
 import {
@@ -18,11 +19,18 @@ import {
 import { useData } from "@/contexts/DataContext";
 import { toast } from "sonner";
 import { Link } from "wouter";
-import type { Trip, FillUp } from "@/types";
+import type { Trip, FillUp, Vehicle, VehicleStatus } from "@/types";
 import { cn } from "@/lib/utils";
 
 type ImportMode = "merge" | "replace";
-interface ImportPreview<T> { records: T[]; errors: string[]; existingIds: Set<string>; }
+interface ImportPreview<T> { records: T[]; errors: string[]; headerWarnings: string[]; existingIds: Set<string>; }
+
+const STATUS_LABELS: Record<VehicleStatus, { label: string; color: string }> = {
+  active:   { label: "Active",    color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-400" },
+  retired:  { label: "Retired",   color: "bg-muted text-muted-foreground" },
+  sold:     { label: "Sold",      color: "bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-400" },
+  traded:   { label: "Traded In", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-400" },
+};
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -65,8 +73,8 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-function ImportPreviewCard({ title, total, duplicates, errors, mode, onConfirm, onCancel, preview }: {
-  title: string; total: number; duplicates: number; errors: string[];
+function ImportPreviewCard({ title, total, duplicates, errors, headerWarnings, mode, onConfirm, onCancel, preview }: {
+  title: string; total: number; duplicates: number; errors: string[]; headerWarnings: string[];
   mode: ImportMode; onConfirm: () => void; onCancel: () => void; preview: string[];
 }) {
   const newRecords = mode === "merge" ? total - duplicates : total;
@@ -82,6 +90,12 @@ function ImportPreviewCard({ title, total, duplicates, errors, mode, onConfirm, 
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span>Will {mode === "merge" ? `add ${newRecords} new` : `replace all with ${total}`} records</span>
         </div>
+        {headerWarnings.map((w, i) => (
+          <div key={i} className="flex items-start gap-2 text-muted-foreground text-xs">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
+            <span>{w}</span>
+          </div>
+        ))}
         {errors.length > 0 && (
           <div className="flex items-start gap-2 text-amber-600 dark:text-amber-400">
             <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -92,13 +106,154 @@ function ImportPreviewCard({ title, total, duplicates, errors, mode, onConfirm, 
       {preview.length > 0 && (
         <div className="bg-card border border-border rounded-xl p-3 space-y-1">
           <p className="text-xs text-muted-foreground font-semibold">Preview (first {preview.length})</p>
-          {preview.map((p, i) => <p key={i} className="text-xs font-mono text-muted-foreground">{p}</p>)}
+          {preview.map((p, i) => <p key={i} className="text-xs font-mono text-muted-foreground truncate">{p}</p>)}
           {total > 3 && <p className="text-xs text-muted-foreground">…and {total - 3} more</p>}
         </div>
       )}
       <div className="flex gap-2 pt-1">
-        <Button size="sm" onClick={onConfirm} className="flex-1 rounded-xl">Import</Button>
+        <Button size="sm" onClick={onConfirm} className="flex-1 rounded-xl" disabled={newRecords === 0 && mode === "merge"}>
+          Import {mode === "merge" ? newRecords : total} records
+        </Button>
         <Button size="sm" variant="outline" onClick={onCancel} className="rounded-xl">Cancel</Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Vehicle form (extracted to prevent keyboard-dismiss bug) ──────────────────
+// Key insight: never put form state inside a component that re-renders on every
+// keystroke due to parent state changes. Use local state only.
+
+function VehicleForm({
+  initial,
+  onSave,
+  onCancel,
+  showCancel,
+}: {
+  initial: Partial<Vehicle>;
+  onSave: (v: Partial<Vehicle>) => void;
+  onCancel?: () => void;
+  showCancel?: boolean;
+}) {
+  const [form, setForm] = useState({
+    name: initial.name ?? "",
+    year: initial.year ? String(initial.year) : "",
+    make: initial.make ?? "",
+    model: initial.model ?? "",
+    trim: initial.trim ?? "",
+    color: initial.color ?? "",
+    licensePlate: initial.licensePlate ?? "",
+    vin: initial.vin ?? "",
+    fuelType: initial.fuelType ?? "Gasoline",
+    fuelTankCapacity: initial.fuelTankCapacity ? String(initial.fuelTankCapacity) : "",
+    initialOdometer: initial.initialOdometer ? String(initial.initialOdometer) : "",
+    defaultFuelConsumption: initial.defaultFuelConsumption ? String(initial.defaultFuelConsumption) : "",
+    purchasePrice: initial.purchasePrice ? String(initial.purchasePrice) : "",
+    purchaseDate: initial.purchaseDate ?? "",
+    saleValue: initial.saleValue ? String(initial.saleValue) : "",
+    saleDate: initial.saleDate ?? "",
+    status: (initial.status ?? "active") as VehicleStatus,
+    insuranceExpiry: initial.insuranceExpiry ?? "",
+    registrationExpiry: initial.registrationExpiry ?? "",
+    warrantyExpiry: initial.warrantyExpiry ?? "",
+    tradeNotes: initial.tradeNotes ?? "",
+    ownershipNotes: initial.ownershipNotes ?? "",
+    notes: initial.notes ?? "",
+  });
+
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    setForm(p => ({ ...p, [k]: e.target.value }));
+
+  const F = ({ label, k, type = "text", placeholder = "" }: { label: string; k: keyof typeof form; type?: string; placeholder?: string }) => (
+    <div>
+      <Label className="text-xs text-muted-foreground mb-1 block">{label}</Label>
+      <Input type={type} placeholder={placeholder} value={form[k] as string} onChange={set(k)} className="h-10" />
+    </div>
+  );
+
+  const handleSave = () => onSave(form);
+
+  return (
+    <div className="space-y-4">
+      {/* Status */}
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1.5 block">Vehicle Status</Label>
+        <div className="flex gap-2 flex-wrap">
+          {(["active", "retired", "sold", "traded"] as VehicleStatus[]).map(s => (
+            <button
+              key={s}
+              onClick={() => setForm(p => ({ ...p, status: s }))}
+              className={cn(
+                "px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all",
+                form.status === s
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {STATUS_LABELS[s].label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Identity */}
+      <div className="grid grid-cols-2 gap-3">
+        <F label="Nickname" k="name" placeholder="My Car" />
+        <F label="Year" k="year" type="number" placeholder="2022" />
+        <F label="Make" k="make" placeholder="Honda" />
+        <F label="Model" k="model" placeholder="Civic" />
+        <F label="Trim" k="trim" placeholder="Sport" />
+        <F label="Colour" k="color" placeholder="Silver" />
+        <F label="License Plate" k="licensePlate" placeholder="ABC-1234" />
+        <F label="VIN" k="vin" placeholder="1HGBH41…" />
+      </div>
+
+      {/* Fuel */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs text-muted-foreground mb-1 block">Fuel Type</Label>
+          <select className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm"
+            value={form.fuelType} onChange={set("fuelType")}>
+            {["Gasoline", "Diesel", "Electric", "Hybrid", "E85", "Other"].map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <F label="Tank Size (L)" k="fuelTankCapacity" type="number" placeholder="60" />
+        <F label="Initial Odometer (km)" k="initialOdometer" type="number" placeholder="0" />
+        <F label="Default L/100km" k="defaultFuelConsumption" type="number" placeholder="8.5" />
+      </div>
+
+      {/* Purchase */}
+      <div className="grid grid-cols-2 gap-3">
+        <F label="Purchase Price" k="purchasePrice" type="number" placeholder="25000" />
+        <F label="Purchase Date" k="purchaseDate" type="date" />
+        <F label="Insurance Expiry" k="insuranceExpiry" type="date" />
+        <F label="Registration Expiry" k="registrationExpiry" type="date" />
+        <F label="Warranty Expiry" k="warrantyExpiry" type="date" />
+      </div>
+
+      {/* Sale / Trade */}
+      {(form.status === "sold" || form.status === "traded") && (
+        <div className="grid grid-cols-2 gap-3">
+          <F label={form.status === "traded" ? "Trade Value" : "Sale Price"} k="saleValue" type="number" placeholder="15000" />
+          <F label={form.status === "traded" ? "Trade Date" : "Sale Date"} k="saleDate" type="date" />
+          <div className="col-span-2">
+            <Label className="text-xs text-muted-foreground mb-1 block">Trade / Sale Notes</Label>
+            <Textarea value={form.tradeNotes} onChange={set("tradeNotes")} rows={2} className="resize-none" placeholder="Dealer, trade-in details…" />
+          </div>
+        </div>
+      )}
+
+      {/* Ownership notes */}
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1 block">Ownership Notes</Label>
+        <Textarea value={form.ownershipNotes} onChange={set("ownershipNotes")} rows={2} className="resize-none" placeholder="Anything worth remembering…" />
+      </div>
+
+      <div className="flex gap-2">
+        <Button onClick={handleSave} className="flex-1 rounded-xl gap-1.5"><Check className="h-4 w-4" />Save Vehicle</Button>
+        {showCancel && onCancel && (
+          <Button variant="outline" onClick={onCancel} className="rounded-xl">Cancel</Button>
+        )}
       </div>
     </div>
   );
@@ -107,9 +262,11 @@ function ImportPreviewCard({ title, total, duplicates, errors, mode, onConfirm, 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const { settings, updateSettings } = useAppContext();
+  const { settings, updateSettings, activeVehicle } = useAppContext();
   const { trips, fillUps, refreshData } = useData();
   const [newCategory, setNewCategory] = useState("");
+  const [addingVehicle, setAddingVehicle] = useState(false);
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
 
   const [tripPreview, setTripPreview] = useState<ImportPreview<Trip> | null>(null);
   const [fillUpPreview, setFillUpPreview] = useState<ImportPreview<FillUp> | null>(null);
@@ -118,99 +275,102 @@ export default function SettingsPage() {
   const fillUpFileRef = useRef<HTMLInputElement>(null);
   const jsonFileRef = useRef<HTMLInputElement>(null);
 
-  const v = settings?.vehicleInfo;
-  const [vehicle, setVehicle] = useState({
-    make: v?.make || "",
-    model: v?.model || "",
-    year: v?.year ? String(v.year) : "",
-    name: v?.name || "",
-    trim: v?.trim || "",
-    licensePlate: v?.licensePlate || "",
-    vin: v?.vin || "",
-    fuelType: v?.fuelType || "Gasoline",
-    color: v?.color || "",
-    fuelTankCapacity: v?.fuelTankCapacity ? String(v.fuelTankCapacity) : "",
-    initialOdometer: v?.initialOdometer ? String(v.initialOdometer) : "",
-    defaultFuelConsumption: v?.defaultFuelConsumption ? String(v.defaultFuelConsumption) : "",
-    purchasePrice: v?.purchasePrice ? String(v.purchasePrice) : "",
-    purchaseDate: v?.purchaseDate || "",
-    insuranceExpiry: v?.insuranceExpiry || "",
-    registrationExpiry: v?.registrationExpiry || "",
-    warrantyExpiry: v?.warrantyExpiry || "",
-    notes: v?.notes || "",
-  });
-
   if (!settings) return <div className="pt-8 text-center text-muted-foreground">Loading…</div>;
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
+  const vehicles = settings.vehicles ?? (settings.vehicleInfo ? [{ ...settings.vehicleInfo, id: settings.vehicleInfo.id ?? "vehicle-1", status: "active" as VehicleStatus }] : []);
 
-  const handleSaveVehicle = async () => {
-    await updateSettings({
-      vehicleInfo: {
-        make: vehicle.make || "Unknown",
-        model: vehicle.model || "Unknown",
-        year: parseInt(vehicle.year) || new Date().getFullYear(),
-        name: vehicle.name || undefined,
-        trim: vehicle.trim || undefined,
-        licensePlate: vehicle.licensePlate || undefined,
-        vin: vehicle.vin || undefined,
-        color: vehicle.color || undefined,
-        fuelType: vehicle.fuelType || undefined,
-        fuelTankCapacity: parseFloat(vehicle.fuelTankCapacity) || 60,
-        initialOdometer: parseFloat(vehicle.initialOdometer) || 0,
-        defaultFuelConsumption: parseFloat(vehicle.defaultFuelConsumption) || undefined,
-        purchasePrice: vehicle.purchasePrice ? parseFloat(vehicle.purchasePrice) : undefined,
-        purchaseDate: vehicle.purchaseDate || undefined,
-        insuranceExpiry: vehicle.insuranceExpiry || undefined,
-        registrationExpiry: vehicle.registrationExpiry || undefined,
-        warrantyExpiry: vehicle.warrantyExpiry || undefined,
-        notes: vehicle.notes || undefined,
-      },
-    });
-    toast.success("Vehicle saved");
+  // ── Vehicle handlers ──────────────────────────────────────────────────────
+
+  const handleSaveVehicle = async (partial: Partial<Vehicle>, existingId?: string) => {
+    const id = existingId ?? crypto.randomUUID();
+    const updated: Vehicle = {
+      id,
+      make: partial.make || "Unknown",
+      model: partial.model || "Unknown",
+      year: parseInt(partial.year as any) || new Date().getFullYear(),
+      name: (partial.name as string) || undefined,
+      trim: (partial.trim as string) || undefined,
+      licensePlate: (partial.licensePlate as string) || undefined,
+      vin: (partial.vin as string) || undefined,
+      color: (partial.color as string) || undefined,
+      fuelType: (partial.fuelType as string) || undefined,
+      fuelTankCapacity: parseFloat(partial.fuelTankCapacity as any) || 60,
+      initialOdometer: parseFloat(partial.initialOdometer as any) || 0,
+      defaultFuelConsumption: parseFloat(partial.defaultFuelConsumption as any) || undefined,
+      status: (partial.status as VehicleStatus) || "active",
+      purchasePrice: partial.purchasePrice ? parseFloat(partial.purchasePrice as any) : undefined,
+      purchaseDate: (partial.purchaseDate as string) || undefined,
+      saleValue: partial.saleValue ? parseFloat(partial.saleValue as any) : undefined,
+      saleDate: (partial.saleDate as string) || undefined,
+      tradeNotes: (partial.tradeNotes as string) || undefined,
+      ownershipNotes: (partial.ownershipNotes as string) || undefined,
+      insuranceExpiry: (partial.insuranceExpiry as string) || undefined,
+      registrationExpiry: (partial.registrationExpiry as string) || undefined,
+      warrantyExpiry: (partial.warrantyExpiry as string) || undefined,
+    };
+
+    const newList = existingId
+      ? vehicles.map(v => v.id === existingId ? updated : v)
+      : [...vehicles, updated];
+
+    // If this is now "active", deactivate others
+    const finalList = updated.status === "active"
+      ? newList.map(v => v.id === id ? v : v.status === "active" ? { ...v, status: "retired" as VehicleStatus } : v)
+      : newList;
+
+    const activeId = finalList.find(v => v.status === "active")?.id ?? finalList[0].id;
+
+    await updateSettings({ vehicles: finalList, activeVehicleId: activeId, vehicleInfo: updated });
+    toast.success(existingId ? "Vehicle updated" : "Vehicle added");
+    setAddingVehicle(false);
+    setEditingVehicleId(null);
   };
+
+  const handleSetActive = async (id: string) => {
+    const newList = vehicles.map(v => ({
+      ...v,
+      status: v.id === id ? "active" as VehicleStatus : v.status === "active" ? "retired" as VehicleStatus : v.status,
+    }));
+    await updateSettings({ vehicles: newList, activeVehicleId: id });
+    toast.success("Active vehicle changed");
+  };
+
+  const handleDeleteVehicle = async (id: string) => {
+    if (!confirm("Remove this vehicle? Your trip data will be preserved.")) return;
+    const newList = vehicles.filter(v => v.id !== id);
+    const activeId = newList.find(v => v.status === "active")?.id ?? newList[0]?.id;
+    await updateSettings({ vehicles: newList, activeVehicleId: activeId });
+    toast.success("Vehicle removed");
+  };
+
+  // ── CSV / data handlers ───────────────────────────────────────────────────
 
   const handleExportJSON = async () => {
     const data = await exportAllData();
-    downloadFile(JSON.stringify(data, null, 2), "application/json",
-      `trip-tracker-backup-${today()}.json`);
+    downloadFile(JSON.stringify(data, null, 2), "application/json", `trip-tracker-backup-${today()}.json`);
     toast.success("Backup exported");
   };
 
-  const handleExportTripsCSV = () => {
-    downloadFile(tripsToCSV(trips), "text/csv", `trips-${today()}.csv`);
-    toast.success("Trips CSV exported");
-  };
-
-  const handleExportFillUpsCSV = () => {
-    downloadFile(fillUpsToCSV(fillUps), "text/csv", `fillups-${today()}.csv`);
-    toast.success("Fill-ups CSV exported");
-  };
-
   const handleImportJSON = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const file = e.target.files?.[0]; if (!file) return;
     try {
       const data = JSON.parse(await file.text());
       if (!data.trips || !data.fillUps || !data.settings) throw new Error("Invalid backup");
-      await importAllData(data);
-      await refreshData();
+      await importAllData(data); await refreshData();
       toast.success("Data restored from backup");
     } catch { toast.error("Failed to read backup file"); }
     if (jsonFileRef.current) jsonFileRef.current.value = "";
   };
 
   const handleTripFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const file = e.target.files?.[0]; if (!file) return;
     const result = parseTripsCSV(await file.text());
     setTripPreview({ ...result, existingIds: new Set(trips.map(t => t.id)) });
     if (tripFileRef.current) tripFileRef.current.value = "";
   };
 
   const handleFillUpFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const file = e.target.files?.[0]; if (!file) return;
     const result = parseFillUpsCSV(await file.text());
     setFillUpPreview({ ...result, existingIds: new Set(fillUps.map(f => f.id)) });
     if (fillUpFileRef.current) fillUpFileRef.current.value = "";
@@ -225,10 +385,9 @@ export default function SettingsPage() {
         toast.success(`Replaced with ${tripPreview.records.length} trips`);
       } else {
         const r = await mergeTripsFromCSV(tripPreview.records);
-        toast.success(`Added ${r.added} trips, skipped ${r.skipped} duplicates`);
+        toast.success(`Added ${r.added} trip${r.added !== 1 ? "s" : ""}, skipped ${r.skipped} duplicate${r.skipped !== 1 ? "s" : ""}`);
       }
-      await refreshData();
-      setTripPreview(null);
+      await refreshData(); setTripPreview(null);
     } catch { toast.error("Import failed"); }
   };
 
@@ -241,10 +400,9 @@ export default function SettingsPage() {
         toast.success(`Replaced with ${fillUpPreview.records.length} fill-ups`);
       } else {
         const r = await mergeFillUpsFromCSV(fillUpPreview.records);
-        toast.success(`Added ${r.added} fill-ups, skipped ${r.skipped} duplicates`);
+        toast.success(`Added ${r.added} fill-up${r.added !== 1 ? "s" : ""}, skipped ${r.skipped} duplicate${r.skipped !== 1 ? "s" : ""}`);
       }
-      await refreshData();
-      setFillUpPreview(null);
+      await refreshData(); setFillUpPreview(null);
     } catch { toast.error("Import failed"); }
   };
 
@@ -255,35 +413,8 @@ export default function SettingsPage() {
     setNewCategory("");
   };
 
-  const handleRemoveCategory = (cat: string) => {
-    updateSettings({ categories: settings.categories.filter(c => c !== cat) });
-  };
-
-  const handleResetData = async () => {
-    if (!confirm("This will permanently delete ALL trips, fill-ups, and maintenance records. Continue?")) return;
-    for (const t of trips) await deleteTrip(t.id);
-    for (const f of fillUps) await deleteFillUp(f.id);
-    await refreshData();
-    toast.success("All data cleared");
-  };
-
-  const duplicatesInTrips = tripPreview
-    ? tripPreview.records.filter(r => tripPreview.existingIds.has(r.id)).length : 0;
-  const duplicatesInFillUps = fillUpPreview
-    ? fillUpPreview.records.filter(r => fillUpPreview.existingIds.has(r.id)).length : 0;
-
-  const vf = (key: keyof typeof vehicle) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      setVehicle(p => ({ ...p, [key]: e.target.value }));
-
-  const FieldInput = ({ label, k, type = "text", placeholder = "" }: {
-    label: string; k: keyof typeof vehicle; type?: string; placeholder?: string;
-  }) => (
-    <div>
-      <Label className="text-xs text-muted-foreground mb-1 block">{label}</Label>
-      <Input type={type} placeholder={placeholder} value={vehicle[k] as string} onChange={vf(k)} className="h-10" />
-    </div>
-  );
+  const duplicatesInTrips = tripPreview ? tripPreview.records.filter(r => tripPreview.existingIds.has(r.id)).length : 0;
+  const duplicatesInFillUps = fillUpPreview ? fillUpPreview.records.filter(r => fillUpPreview.existingIds.has(r.id)).length : 0;
 
   return (
     <div className="flex flex-col gap-6 page-enter pb-10 pt-4">
@@ -300,16 +431,9 @@ export default function SettingsPage() {
                 { value: "system", icon: <Monitor className="h-3.5 w-3.5" /> },
                 { value: "dark", icon: <Moon className="h-3.5 w-3.5" /> },
               ] as const).map(t => (
-                <button
-                  key={t.value}
-                  onClick={() => updateSettings({ theme: t.value })}
-                  className={cn(
-                    "flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all capitalize",
-                    settings.theme === t.value
-                      ? "bg-card shadow text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
+                <button key={t.value} onClick={() => updateSettings({ theme: t.value })}
+                  className={cn("flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all capitalize",
+                    settings.theme === t.value ? "bg-card shadow text-foreground" : "text-muted-foreground hover:text-foreground")}>
                   {t.icon} {t.value}
                 </button>
               ))}
@@ -318,89 +442,113 @@ export default function SettingsPage() {
         </div>
       </Section>
 
-      {/* ── Vehicle ── */}
-      <Section title="Vehicle" icon={<Car className="h-3.5 w-3.5" />}>
-        <div className="bg-card border border-card-border rounded-2xl p-4 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <FieldInput label="Nickname" k="name" placeholder="My Car" />
-            <FieldInput label="Year" k="year" type="number" placeholder="2022" />
-            <FieldInput label="Make" k="make" placeholder="Honda" />
-            <FieldInput label="Model" k="model" placeholder="Civic" />
-            <FieldInput label="Trim" k="trim" placeholder="Sport" />
-            <FieldInput label="Colour" k="color" placeholder="Midnight Blue" />
-            <FieldInput label="License Plate" k="licensePlate" placeholder="ABC-1234" />
-            <FieldInput label="VIN" k="vin" placeholder="1HGBH41…" />
+      {/* ── Vehicles ── */}
+      <Section title="Vehicles" icon={<Car className="h-3.5 w-3.5" />}>
+        {/* Vehicle list */}
+        {vehicles.length > 0 && (
+          <div className="flex flex-col gap-3 mb-3">
+            {vehicles.map(v => {
+              const name = v.name || `${v.year} ${v.make} ${v.model}`;
+              const st = STATUS_LABELS[v.status ?? "active"];
+              const isEditing = editingVehicleId === v.id;
+              return (
+                <div key={v.id} className="bg-card border border-card-border rounded-2xl overflow-hidden">
+                  <div className="flex items-center gap-3 p-4">
+                    <div className="w-9 h-9 bg-primary/10 rounded-xl flex items-center justify-center shrink-0">
+                      <Car className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-semibold text-sm truncate">{name}</p>
+                        <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-md", st.color)}>{st.label}</span>
+                        {settings.activeVehicleId === v.id && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-primary/10 text-primary">Current</span>
+                        )}
+                      </div>
+                      {v.licensePlate && <p className="text-xs text-muted-foreground">{v.licensePlate}</p>}
+                    </div>
+                  </div>
+                  <div className="flex border-t border-border divide-x divide-border">
+                    <button onClick={() => setEditingVehicleId(isEditing ? null : v.id)}
+                      className="flex-1 py-2 text-xs font-semibold text-primary hover:bg-muted/30 transition-colors">
+                      {isEditing ? "Close" : "Edit"}
+                    </button>
+                    {(v.status !== "active") && (
+                      <button onClick={() => handleSetActive(v.id)}
+                        className="flex-1 py-2 text-xs font-semibold text-emerald-600 hover:bg-muted/30 transition-colors">
+                        Set Active
+                      </button>
+                    )}
+                    <button onClick={() => handleDeleteVehicle(v.id)}
+                      className="flex-1 py-2 text-xs font-semibold text-destructive hover:bg-muted/30 transition-colors">
+                      Remove
+                    </button>
+                  </div>
+                  {isEditing && (
+                    <div className="p-4 border-t border-border">
+                      <VehicleForm
+                        initial={v}
+                        onSave={partial => handleSaveVehicle(partial, v.id)}
+                        onCancel={() => setEditingVehicleId(null)}
+                        showCancel
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
+        )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1 block">Fuel Type</Label>
-              <select
-                className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm"
-                value={vehicle.fuelType}
-                onChange={vf("fuelType")}
-              >
-                {["Gasoline", "Diesel", "Electric", "Hybrid", "E85", "Other"].map(t => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-            <FieldInput label="Tank Size (L)" k="fuelTankCapacity" type="number" placeholder="60" />
-            <FieldInput label="Initial Odometer (km)" k="initialOdometer" type="number" placeholder="0" />
-            <FieldInput label="Default L/100km" k="defaultFuelConsumption" type="number" placeholder="8.5" />
+        {/* Add new vehicle */}
+        {addingVehicle ? (
+          <div className="bg-card border border-card-border rounded-2xl p-4">
+            <p className="font-bold text-sm mb-4">Add Vehicle</p>
+            <VehicleForm
+              initial={{ status: "active" }}
+              onSave={partial => handleSaveVehicle(partial)}
+              onCancel={() => setAddingVehicle(false)}
+              showCancel
+            />
           </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FieldInput label="Purchase Price" k="purchasePrice" type="number" placeholder="25000" />
-            <FieldInput label="Purchase Date" k="purchaseDate" type="date" />
-            <FieldInput label="Insurance Expiry" k="insuranceExpiry" type="date" />
-            <FieldInput label="Registration Expiry" k="registrationExpiry" type="date" />
-            <FieldInput label="Warranty Expiry" k="warrantyExpiry" type="date" />
-          </div>
-
-          <Button onClick={handleSaveVehicle} className="w-full rounded-xl">Save Vehicle</Button>
-        </div>
+        ) : (
+          <Button variant="outline" onClick={() => setAddingVehicle(true)} className="w-full h-11 rounded-xl gap-2">
+            <Plus className="h-4 w-4" /> Add Vehicle
+          </Button>
+        )}
       </Section>
 
       {/* ── Units ── */}
       <Section title="Units & Currency" icon={<Settings2 className="h-3.5 w-3.5" />}>
         <div className="bg-card border border-card-border rounded-2xl overflow-hidden divide-y divide-border">
           <SettingRow label="Distance">
-            <select
-              className="bg-background border border-input rounded-lg px-2 py-1 text-sm"
+            <select className="bg-background border border-input rounded-lg px-2 py-1 text-sm"
               value={settings.units.distance}
-              onChange={e => updateSettings({ units: { ...settings.units, distance: e.target.value as "km" | "miles" } })}
-            >
+              onChange={e => updateSettings({ units: { ...settings.units, distance: e.target.value as any } })}>
               <option value="km">Kilometres (km)</option>
               <option value="miles">Miles (mi)</option>
             </select>
           </SettingRow>
           <SettingRow label="Fuel Economy">
-            <select
-              className="bg-background border border-input rounded-lg px-2 py-1 text-sm"
+            <select className="bg-background border border-input rounded-lg px-2 py-1 text-sm"
               value={settings.units.fuelEfficiency}
-              onChange={e => updateSettings({ units: { ...settings.units, fuelEfficiency: e.target.value as "L/100km" | "mpg" } })}
-            >
+              onChange={e => updateSettings({ units: { ...settings.units, fuelEfficiency: e.target.value as any } })}>
               <option value="L/100km">L/100km</option>
               <option value="mpg">MPG</option>
             </select>
           </SettingRow>
           <SettingRow label="Volume">
-            <select
-              className="bg-background border border-input rounded-lg px-2 py-1 text-sm"
+            <select className="bg-background border border-input rounded-lg px-2 py-1 text-sm"
               value={settings.units.volume}
-              onChange={e => updateSettings({ units: { ...settings.units, volume: e.target.value as "liters" | "gallons" } })}
-            >
+              onChange={e => updateSettings({ units: { ...settings.units, volume: e.target.value as any } })}>
               <option value="liters">Litres</option>
               <option value="gallons">Gallons</option>
             </select>
           </SettingRow>
           <SettingRow label="Currency Symbol">
-            <Input
-              className="w-16 h-8 text-center text-sm"
+            <Input className="w-16 h-8 text-center text-sm"
               value={settings.units.currency}
-              onChange={e => updateSettings({ units: { ...settings.units, currency: e.target.value } })}
-            />
+              onChange={e => updateSettings({ units: { ...settings.units, currency: e.target.value } })} />
           </SettingRow>
         </div>
       </Section>
@@ -410,37 +558,27 @@ export default function SettingsPage() {
         <div className="bg-card border border-card-border rounded-2xl p-4 space-y-3">
           <div>
             <Label className="text-xs text-muted-foreground mb-1.5 block">Default Category</Label>
-            <Select
-              value={settings.defaultCategory || settings.categories[0]}
-              onValueChange={val => updateSettings({ defaultCategory: val })}
-            >
+            <Select value={settings.defaultCategory || settings.categories[0]}
+              onValueChange={val => updateSettings({ defaultCategory: val })}>
               <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {settings.categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-              </SelectContent>
+              <SelectContent>{settings.categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="flex flex-wrap gap-2">
             {settings.categories.map(cat => (
               <Badge key={cat} variant="secondary" className="pl-3 pr-1.5 py-1 gap-1 rounded-lg">
                 {cat}
-                <button onClick={() => handleRemoveCategory(cat)} className="hover:text-destructive transition-colors">
-                  <X className="h-3 w-3" />
-                </button>
+                <button onClick={() => updateSettings({ categories: settings.categories.filter(c => c !== cat) })}
+                  className="hover:text-destructive transition-colors"><X className="h-3 w-3" /></button>
               </Badge>
             ))}
           </div>
           <div className="flex gap-2">
-            <Input
-              placeholder="New category…"
-              value={newCategory}
+            <Input placeholder="New category…" value={newCategory}
               onChange={e => setNewCategory(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleAddCategory()}
-              className="h-10"
-            />
-            <Button size="sm" onClick={handleAddCategory} className="h-10 w-10 p-0 rounded-xl shrink-0">
-              <Plus className="h-4 w-4" />
-            </Button>
+              className="h-10" />
+            <Button size="sm" onClick={handleAddCategory} className="h-10 w-10 p-0 rounded-xl shrink-0"><Plus className="h-4 w-4" /></Button>
           </div>
         </div>
       </Section>
@@ -454,6 +592,9 @@ export default function SettingsPage() {
           <RowButton href="/vehicle-costs" icon={<DollarSign className="h-4 w-4" />}
             iconColor="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/60 dark:text-emerald-400"
             title="Vehicle Costs" sub="Insurance, registration & more" />
+          <RowButton href="/ownership-cost" icon={<Archive className="h-4 w-4" />}
+            iconColor="bg-blue-100 text-blue-600 dark:bg-blue-900/60 dark:text-blue-400"
+            title="Ownership Cost" sub="Total cost of ownership analysis" />
         </div>
       </Section>
 
@@ -463,9 +604,9 @@ export default function SettingsPage() {
           <RowButton icon={<Download className="h-4 w-4" />} iconColor="bg-primary/10 text-primary"
             title="Backup (JSON)" sub="All data — trips, fill-ups, settings" onClick={handleExportJSON} />
           <RowButton icon={<Download className="h-4 w-4" />} iconColor="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/60 dark:text-emerald-400"
-            title="Export Trips (CSV)" sub="Open in Excel or Numbers" onClick={handleExportTripsCSV} />
+            title="Export Trips (CSV)" sub="Open in Excel or Numbers" onClick={() => { downloadFile(tripsToCSV(trips), "text/csv", `trips-${today()}.csv`); toast.success("Trips exported"); }} />
           <RowButton icon={<Download className="h-4 w-4" />} iconColor="bg-blue-100 text-blue-600 dark:bg-blue-900/60 dark:text-blue-400"
-            title="Export Fill-Ups (CSV)" sub="Open in Excel or Numbers" onClick={handleExportFillUpsCSV} />
+            title="Export Fill-Ups (CSV)" sub="Open in Excel or Numbers" onClick={() => { downloadFile(fillUpsToCSV(fillUps), "text/csv", `fillups-${today()}.csv`); toast.success("Fill-ups exported"); }} />
         </div>
       </Section>
 
@@ -476,43 +617,32 @@ export default function SettingsPage() {
             <Label className="text-xs text-muted-foreground mb-1.5 block">Import Mode</Label>
             <div className="flex gap-2">
               {(["merge", "replace"] as const).map(m => (
-                <button
-                  key={m}
-                  onClick={() => setImportMode(m)}
-                  className={cn(
-                    "flex-1 py-2 rounded-xl text-xs font-semibold border transition-all",
-                    importMode === m
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "border-border text-muted-foreground hover:text-foreground"
-                  )}
-                >
+                <button key={m} onClick={() => setImportMode(m)}
+                  className={cn("flex-1 py-2 rounded-xl text-xs font-semibold border transition-all",
+                    importMode === m ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground")}>
                   {m === "merge" ? "Merge (keep existing)" : "Replace (clear existing)"}
                 </button>
               ))}
             </div>
           </div>
 
+          {/* JSON restore */}
           <label className="flex items-center gap-3 p-3 border border-border rounded-xl hover:bg-muted/30 cursor-pointer transition-colors">
             <input ref={jsonFileRef} type="file" accept=".json" className="hidden" onChange={handleImportJSON} />
             <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-600 dark:bg-purple-900/60 dark:text-purple-400 flex items-center justify-center shrink-0">
               <Upload className="h-4 w-4" />
             </div>
-            <div>
-              <p className="font-semibold text-sm">Restore from Backup</p>
-              <p className="text-xs text-muted-foreground">JSON file — replaces all data</p>
-            </div>
+            <div><p className="font-semibold text-sm">Restore from Backup</p><p className="text-xs text-muted-foreground">JSON file — restores all data</p></div>
           </label>
 
+          {/* Trips CSV */}
           {!tripPreview ? (
             <label className="flex items-center gap-3 p-3 border border-border rounded-xl hover:bg-muted/30 cursor-pointer transition-colors">
               <input ref={tripFileRef} type="file" accept=".csv" className="hidden" onChange={handleTripFileSelect} />
               <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-600 dark:bg-emerald-900/60 dark:text-emerald-400 flex items-center justify-center shrink-0">
                 <Upload className="h-4 w-4" />
               </div>
-              <div>
-                <p className="font-semibold text-sm">Import Trips CSV</p>
-                <p className="text-xs text-muted-foreground">Must match exported format</p>
-              </div>
+              <div><p className="font-semibold text-sm">Import Trips CSV</p><p className="text-xs text-muted-foreground">Flexible header matching</p></div>
             </label>
           ) : (
             <ImportPreviewCard
@@ -520,6 +650,7 @@ export default function SettingsPage() {
               total={tripPreview.records.length}
               duplicates={duplicatesInTrips}
               errors={tripPreview.errors}
+              headerWarnings={tripPreview.headerWarnings}
               mode={importMode}
               onConfirm={handleImportTrips}
               onCancel={() => setTripPreview(null)}
@@ -527,16 +658,14 @@ export default function SettingsPage() {
             />
           )}
 
+          {/* Fill-ups CSV */}
           {!fillUpPreview ? (
             <label className="flex items-center gap-3 p-3 border border-border rounded-xl hover:bg-muted/30 cursor-pointer transition-colors">
               <input ref={fillUpFileRef} type="file" accept=".csv" className="hidden" onChange={handleFillUpFileSelect} />
               <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-900/60 dark:text-blue-400 flex items-center justify-center shrink-0">
                 <Upload className="h-4 w-4" />
               </div>
-              <div>
-                <p className="font-semibold text-sm">Import Fill-Ups CSV</p>
-                <p className="text-xs text-muted-foreground">Must match exported format</p>
-              </div>
+              <div><p className="font-semibold text-sm">Import Fill-Ups CSV</p><p className="text-xs text-muted-foreground">Flexible header matching</p></div>
             </label>
           ) : (
             <ImportPreviewCard
@@ -544,6 +673,7 @@ export default function SettingsPage() {
               total={fillUpPreview.records.length}
               duplicates={duplicatesInFillUps}
               errors={fillUpPreview.errors}
+              headerWarnings={fillUpPreview.headerWarnings}
               mode={importMode}
               onConfirm={handleImportFillUps}
               onCancel={() => setFillUpPreview(null)}
@@ -557,9 +687,14 @@ export default function SettingsPage() {
       <Section title="Danger Zone">
         <div className="bg-card border border-destructive/30 rounded-2xl overflow-hidden">
           <button
-            onClick={handleResetData}
-            className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-destructive/5 transition-colors"
-          >
+            onClick={async () => {
+              if (!confirm("This will permanently delete ALL trips, fill-ups & maintenance records. Continue?")) return;
+              for (const t of trips) await deleteTrip(t.id);
+              for (const f of fillUps) await deleteFillUp(f.id);
+              await refreshData();
+              toast.success("All data cleared");
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-destructive/5 transition-colors">
             <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-900/60 dark:text-rose-400 flex items-center justify-center shrink-0">
               <X className="h-4 w-4" />
             </div>
@@ -572,7 +707,7 @@ export default function SettingsPage() {
       </Section>
 
       <p className="text-center text-xs text-muted-foreground py-2">
-        Trip Tracker v2.0 · {trips.length} trips · {fillUps.length} fill-ups
+        Trip Tracker v2.1 · {trips.length} trips · {fillUps.length} fill-ups
       </p>
     </div>
   );
@@ -581,9 +716,7 @@ export default function SettingsPage() {
 function downloadFile(content: string, mimeType: string, filename: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
+  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
-
 function today() { return new Date().toISOString().split("T")[0]; }

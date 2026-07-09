@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Map, Droplet, Settings, BarChart2, Wrench, Car } from "lucide-react";
+import { LayoutDashboard, Map, Droplet, Settings, BarChart2, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [

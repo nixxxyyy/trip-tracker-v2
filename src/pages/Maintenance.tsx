@@ -167,7 +167,7 @@ function MaintenanceCard({
 
 export default function MaintenancePage() {
   const { maintenance, createMaintenance, removeMaintenance, trips, fillUps } = useData();
-  const { settings } = useAppContext();
+  const { settings, activeVehicle } = useAppContext();
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState<string | null>(null);
@@ -175,7 +175,7 @@ export default function MaintenancePage() {
   const latestOdometer = Math.max(
     ...trips.filter(t => t.endOdometer != null).map(t => t.endOdometer!),
     ...(fillUps.length > 0 ? [fillUps[0].odometer] : []),
-    settings?.vehicleInfo?.initialOdometer ?? 0,
+    activeVehicle?.initialOdometer ?? 0,
     0,
   );
 
